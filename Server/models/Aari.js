@@ -1,14 +1,17 @@
 const mongoose = require("mongoose");
 
 const AariinputSchema = new mongoose.Schema({
-    orderid:String,
-    name:String,
-    phonenumber:String,
-    submissiondate:String,
-    deliveryDate:String,
-    additionalinformation:String,
-    design:String,
-},{collection:"Aari"});
+    orderid: { type: String, required: true, unique: true }, 
+    name: { type: String, required: true },
+    phonenumber: { type: String, required: true },
+    submissiondate: { type: Date, required: true }, 
+    deliveryDate: { type: Date, required: true },   
+    additionalinformation: String,
+    design: String, // URL of the design
+}, { 
+    collection: "Aari",
+    timestamps: true  
+});
 
 const Aari = mongoose.model("Aari", AariinputSchema);
-module.exports= Aari;
+module.exports = Aari;
