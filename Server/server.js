@@ -4,7 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const multer = require("multer");
-const AWS = require("aws-sdk");
+const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 
 const app = express();
 
@@ -12,23 +12,24 @@ app.use(cors({ origin: true }));
 app.use(express.json());
 
 // MongoDB Connection
-const MONGO = process.env.MONGO_URI;
+const MONGO = process.env.MONGO;
 
 mongoose
   .connect(MONGO, {})
   .then(() => console.log("MongoDB Connected"))
   .catch((err) => {
     console.error("MongoDB Connection Error:", err);
+    process.exit(1); // Exit the process if MongoDB connection fails
   });
 
 // AWS Configuration
-AWS.config.update({
-  accessKeyId: process.env.KEY_ID,
-  secretAccessKey: process.env.ACCESS_KEY,
+const s3 = new S3Client({
   region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.KEY_ID,
+    secretAccessKey: process.env.ACCESS_KEY,
+  },
 });
-
-const s3 = new AWS.S3();
 
 // Import Models
 const Shop = require("./models/Shop");
@@ -47,6 +48,16 @@ const upload = multer({
       cb(new Error("Only JPG, JPEG, and PNG images are allowed."));
     }
   },
+});
+
+// Error handling for Multer
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    return res.status(400).json({ error: err.message });
+  } else if (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  next();
 });
 
 // API Endpoints
@@ -108,14 +119,14 @@ app.post("/submitAariInput", upload.single("design"), async (req, res) => {
 
       const params = {
         Bucket: process.env.S3_BUCKET_NAME,
-        Key: `uploads/Aari/${fileName}`,
+        Key: `/Aari/${fileName}`,
         Body: file.buffer,
         ContentType: file.mimetype,
         ACL: "public-read",
       };
-      const fileUpload = await s3.upload(params).promise();
-
-      designURL = fileUpload.Location;
+      const command = new PutObjectCommand(params);
+      await s3.send(command);
+      designURL = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/Aari/${fileName}`;
     }
 
     const newAariEntry = new Aari({

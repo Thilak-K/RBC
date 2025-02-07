@@ -1,10 +1,13 @@
 const mongoose = require("mongoose");
 
-const ShopSchema = new mongoose.Schema({
-    name:String,
-    logourl:String,
-    authlogoUrl:stringify,
-},{collection:"ShopName"});
+const ShopSchema = new mongoose.Schema(
+  {
+    name: String,
+    logourl: String,
+    authlogoUrl: string,
+  },
+  { collection: "ShopName" }
+);
 
-const Shop = mongoose.model("Shop",ShopSchema)
-module.exports =Shop;
+const Shop = mongoose.model("Shop", ShopSchema);
+module.exports = Shop;
