@@ -7,7 +7,8 @@ const AariinputSchema = new mongoose.Schema({
     submissiondate: { type: Date, required: true }, 
     deliverydate: { type: Date, required: true },   
     additionalinformation: String,
-    design: String, // URL of the design
+    design: String, 
+    status:{type:String, default:"pending"}
 }, { 
     collection: "Aari",
     timestamps: true  
