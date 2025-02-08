@@ -143,7 +143,6 @@ app.post("/submitAariInput", upload.single("design"), async (req, res) => {
 
       const command = new PutObjectCommand(params);
 
-
       designURL = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/Aari/${uniqueFilename}`;
     } else {
       return res.status(400).json({ error: "Design file is required" });
@@ -173,14 +172,27 @@ app.post("/submitAariInput", upload.single("design"), async (req, res) => {
   }
 });
 
-app.get("/getAariBendingPending", async (req, res)=>{
-  try{
-    const pendingOrders = await AariBending.find(
-      {satus:"pending"},
+app.get("/getAariBendingPending", async (req, res) => {
+  try {
+    const pendingOrders = await Aari.find(
+      { status: "pending" },
+      "name design status orderid"
+    );
+    res.status(200).json(pendingOrders);s
+  } catch (error) {
+    console.log("Error fetching pending AariBending orders");
+    res.status(500).json({ error: "Failed to fetch pending orders" });
+  }
+});
+
+app.get("/getAariBendingPending", async (req, res) => {
+  try {
+    const pendingOrders = await Aari.find(
+      { status: "completed" },
       "name design status"
     );
-    res.status(200).json(pendingOrders);
-  }catch(error){
+    res.status(200).json(pendingOrders);s
+  } catch (error) {
     console.log("Error fetching pending AariBending orders");
     res.status(500).json({ error: "Failed to fetch pending orders" });
   }
@@ -191,23 +203,24 @@ app.put("/updateAariBendingStatus/:orderid", async (req, res) => {
     const { orderid } = req.params;
 
     // Update the status to "Completed"
-    const updatedOrder = await AariBending.findOneAndUpdate(
-      { orderid: orderid }, 
-      { status: "Completed" }, 
-      { new: true } 
+    const updatedOrder = await Aari.findOneAndUpdate(
+      { orderid: orderid },
+      { status: "Completed" },
+      { new: true }
     );
 
     if (!updatedOrder) {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    res.status(200).json({ message: "Status updated successfully", updatedOrder });
+    res
+      .status(200)
+      .json({ message: "Status updated successfully", updatedOrder });
   } catch (error) {
     console.error("Error updating AariBending status:", error);
     res.status(500).json({ error: "Failed to update status" });
   }
 });
-
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
