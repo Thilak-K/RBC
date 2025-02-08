@@ -4,12 +4,15 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const multer = require("multer");
+const bodyParser = require("body-parser");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 
 const app = express();
 
 app.use(cors({ origin: true }));
 app.use(express.json());
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
 // MongoDB Connection
 const MONGO = process.env.MONGO;
@@ -105,17 +108,19 @@ app.post("/submitAariInput", upload.single("design"), async (req, res) => {
       name,
       phonenumber,
       submissiondate,
-      deliverydate,
+      deliverydate, 
       additionalinformation,
     } = req.body;
+
+    console.log("Request Body:", req.body); 
+    console.log("Request File:", req.file); 
+
     let designURL = null;
 
     if (req.file) {
       const file = req.file;
       const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-      const fileName = `design-${uniqueSuffix}.${file.originalname
-        .split(".")
-        .pop()}`;
+      const fileName = `design-${uniqueSuffix}.${file.originalname.split(".").pop()}`;
 
       const params = {
         Bucket: process.env.S3_BUCKET_NAME,
@@ -127,17 +132,24 @@ app.post("/submitAariInput", upload.single("design"), async (req, res) => {
       const command = new PutObjectCommand(params);
       await s3.send(command);
       designURL = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/Aari/${fileName}`;
+      console.log("Design URL:", designURL); 
+    }
+
+    if (!designURL) {
+      return res.status(400).json({ error: "Failed to upload design" });
     }
 
     const newAariEntry = new Aari({
-      orderid,
-      name,
-      phonenumber,
-      submissiondate,
-      deliverydate,
-      additionalinformation,
+      orderid: orderid.replace(/"/g, ""),
+      name: name.replace(/"/g, ""),
+      phonenumber: phonenumber.replace(/"/g, ""),
+      submissiondate: submissiondate.replace(/"/g, ""),
+      deliveryDate: deliveryDate.replace(/"/g, ""), // Ensure consistent naming
+      additionalinformation: additionalinformation.replace(/"/g, ""),
       design: designURL,
     });
+
+    console.log("New Aari Entry:", newAariEntry); 
 
     await newAariEntry.save();
     res

@@ -5,7 +5,7 @@ const AariinputSchema = new mongoose.Schema({
     name: { type: String, required: true },
     phonenumber: { type: String, required: true },
     submissiondate: { type: Date, required: true }, 
-    deliveryDate: { type: Date, required: true },   
+    deliverydate: { type: Date, required: true },   
     additionalinformation: String,
     design: String, // URL of the design
 }, { 
