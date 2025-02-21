@@ -6,9 +6,11 @@ const AariinputSchema = new mongoose.Schema({
     phonenumber: { type: String, required: true },
     submissiondate: { type: Date, required: true }, 
     deliverydate: { type: Date, required: true },   
+    address: { type: String, required: true }, 
     additionalinformation: String,
-    design: String, 
-    status:{type:String, default:"pending"}
+    design: [{ type: String }], 
+    staffname: { type: String, required: true }, 
+    status: { type: String, default: "pending" }
 }, { 
     collection: "Aari",
     timestamps: true  
