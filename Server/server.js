@@ -196,6 +196,21 @@ app.get("/getAariBendingPending", async (req, res) => {
   }
 });
 
+// Add this endpoint in server.js
+app.get("/getDesignUrl/:orderid", async (req, res) => {
+  try {
+    const { orderid } = req.params;
+    const order = await Aari.findOne({ orderid }, "design");
+    if (!order) {
+      return res.status(404).json({ success: false, error: "Order not found" });
+    }
+    res.status(200).json({ success: true, design: order.design });
+  } catch (error) {
+    console.error("Error fetching design URL:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch design URL" });
+  }
+});
+
 app.get("/getAariBendingCompleted", async (req, res) => {
   try {
     const completedOrders = await Aari.find({ status: "completed" }, "name design status");
