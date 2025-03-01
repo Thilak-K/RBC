@@ -1,25 +1,19 @@
 require("dotenv").config();
-
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const multer = require("multer");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { v4: uuidv4 } = require("uuid");
+const rateLimit = require("express-rate-limit");
+const winston = require("winston");
+const Joi = require("joi");
+
+// Initialize Express
 const app = express();
 
-
-
-
 // Environment Variable Validation
-const requiredEnvVars = [
-  "MONGO",
-  "AWS_REGION",
-  "KEY_ID",
-  "ACCESS_KEY",
-  "S3_BUCKET_NAME",
-  "PORT",
-];
+const requiredEnvVars = ["MONGO", "AWS_REGION", "KEY_ID", "ACCESS_KEY", "S3_BUCKET_NAME", "PORT"];
 requiredEnvVars.forEach((varName) => {
   if (!process.env[varName]) {
     console.error(`Missing environment variable: ${varName}`);
@@ -27,19 +21,33 @@ requiredEnvVars.forEach((varName) => {
   }
 });
 
-app.use(cors({ origin: true }));
+// Logger Setup
+const logger = winston.createLogger({
+  level: "info",
+  format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
+  transports: [new winston.transports.Console()],
+});
+
+// Middleware
+app.use(cors({ origin: process.env.ALLOWED_ORIGINS?.split(",") || "http://localhost:3000" }));
 app.use(express.json());
+app.use(
+  rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per windowMs
+  })
+);
 
 // MongoDB Connection
 mongoose
-  .connect(process.env.MONGO, {})
-  .then(() => console.log("MongoDB Connected"))
+  .connect(process.env.MONGO, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => logger.info("MongoDB Connected"))
   .catch((err) => {
-    console.error("MongoDB Connection Error:", err);
+    logger.error("MongoDB Connection Error:", err);
     process.exit(1);
   });
 
-// AWS Configuration
+// AWS S3 Configuration
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
   credentials: {
@@ -48,98 +56,83 @@ const s3 = new S3Client({
   },
 });
 
-// Import Models
+// Models
 const Shop = require("./models/Shop");
 const User = require("./models/User");
 const Aari = require("./models/Aari");
 
-// Multer Configuration (Memory storage for S3 upload)
+// Constants
+const STATUS = {
+  PENDING: "pending",
+  COMPLETED: "completed",
+};
+
+// Multer Configuration
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit per file
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ["image/jpeg", "image/png", "image/jpg"];
-    if (allowedTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error("Only JPG, JPEG, and PNG images are allowed."));
-    }
+    if (allowedTypes.includes(file.mimetype)) cb(null, true);
+    else cb(new Error("Only JPG, JPEG, and PNG images are allowed."));
   },
 });
 
-// Error Handling Middleware for Multer
-app.use((err, req, res, next) => {
-  if (err instanceof multer.MulterError) {
-    return res.status(400).json({ success: false, error: err.message });
-  } else if (err) {
-    return res.status(400).json({ success: false, error: err.message });
-  }
-  next();
+// Validation Schemas
+const submitAariSchema = Joi.object({
+  orderid: Joi.string().required(),
+  name: Joi.string().required(),
+  phonenumber: Joi.string().required(),
+  submissiondate: Joi.date().iso().required(),
+  deliverydate: Joi.date().iso().required(),
+  address: Joi.string().required(),
+  additionalinformation: Joi.string().allow(""),
+  staffname: Joi.string().required(),
+  quotedprice: Joi.number().positive().required(),
 });
 
-// API Endpoints
+// Middleware to Validate Requests
+const validate = (schema) => (req, res, next) => {
+  const { error } = schema.validate(req.body);
+  if (error) return res.status(400).json({ success: false, error: error.details[0].message });
+  next();
+};
 
-app.get("/getShopDetails", async (req, res) => {
+// Routes
+app.get("/getShopDetails", async (req, res, next) => {
   try {
     const shop = await Shop.findOne();
-    if (!shop) {
-      return res.status(404).json({ success: false, error: "Shop not found" });
-    }
-    res.json({
-      success: true,
-      data: { name: shop.name, authlogoUrl: shop.authlogoUrl },
-    });
+    if (!shop) return res.status(404).json({ success: false, error: "Shop not found" });
+    res.json({ success: true, data: { name: shop.name, authlogoUrl: shop.authlogoUrl } });
   } catch (error) {
-    console.error("Error fetching shop details:", error);
-    res.status(500).json({ success: false, error: "Internal Server Error" });
+    next(error);
   }
 });
 
-app.post("/getUsersDetails", async (req, res) => {
+app.post("/getUsersDetails", async (req, res, next) => {
   try {
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({ success: false, error: "Email is required" });
+    const { email, phone } = req.body;
+    if (!email || !phone) {
+      return res.status(400).json({ success: false, error: "Email and phone number are required" });
     }
-
-    const user = await User.findOne({ email });
+    const phoneNumber = phone.replace("+91", "");
+    const user = await User.findOne({ email, phonenumber: phoneNumber });
     if (!user) {
       return res.status(404).json({ success: false, error: "User not found" });
     }
-    res.json({
-      success: true,
-      data: { name: user.name, phonenumber: user.phonenumber, email: user.email },
-    });
+    res.json({ success: true, data: { name: user.name, phonenumber: user.phonenumber, email: user.email } });
   } catch (error) {
-    console.error("Error fetching user details:", error);
-    res.status(500).json({ success: false, error: "Internal Server Error" });
+    next(error);
   }
 });
 
-app.post("/submitAariInput", upload.array("design"), async (req, res) => {
+app.post("/submitAariInput", upload.array("design"), validate(submitAariSchema), async (req, res, next) => {
   try {
-    const {
-      orderid,
-      name,
-      phonenumber,
-      submissiondate,
-      deliverydate,
-      address,
-      additionalinformation,
-      staffname,
-    } = req.body;
-
-    // Check for required fields
-    if (!orderid || !name || !phonenumber || !submissiondate || !deliverydate || !address || !staffname) {
-      return res.status(400).json({ success: false, error: "All fields are required" });
-    }
-
-    // Process multiple design files
+    const { orderid, name, phonenumber, submissiondate, deliverydate, address, additionalinformation, staffname, quotedprice } = req.body;
     const designURLs = [];
+
     if (req.files && req.files.length > 0) {
-      const files = req.files; // Array of files from multer
-      for (const file of files) {
+      const uploadPromises = req.files.map(async (file) => {
         const uniqueFilename = `${uuidv4()}.${file.originalname.split(".").pop()}`;
         const params = {
           Bucket: process.env.S3_BUCKET_NAME,
@@ -147,13 +140,10 @@ app.post("/submitAariInput", upload.array("design"), async (req, res) => {
           Body: file.buffer,
           ContentType: file.mimetype,
         };
-
-        const command = new PutObjectCommand(params);
-        await s3.send(command); // Upload to S3
-
-        const url = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/Aari/${uniqueFilename}`;
-        designURLs.push(url);
-      }
+        await s3.send(new PutObjectCommand(params));
+        return `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/Aari/${uniqueFilename}`;
+      });
+      designURLs.push(...(await Promise.all(uploadPromises)));
     } else {
       return res.status(400).json({ success: false, error: "At least one design file is required" });
     }
@@ -162,91 +152,137 @@ app.post("/submitAariInput", upload.array("design"), async (req, res) => {
       orderid,
       name,
       phonenumber,
-      submissiondate: new Date(submissiondate),
-      deliverydate: new Date(deliverydate),
+      submissiondate,
+      deliverydate,
       address,
       additionalinformation,
       staffname,
-      design: designURLs, // Array of S3 URLs
+      design: designURLs,
+      status: STATUS.PENDING,
+      quotedprice,
     });
-
     await newAariEntry.save();
-    res.status(201).json({
-      success: true,
-      message: "Aari input submitted successfully",
-      orderid,
-    });
+    res.status(201).json({ success: true, message: "Aari input submitted successfully", orderid });
   } catch (error) {
-    console.error("Error submitting Aari input:", error);
-    if (error.name === "ValidationError") {
-      res.status(400).json({ success: false, error: error.message });
-    } else {
-      res.status(500).json({ success: false, error: "Failed to submit Aari input" });
-    }
+    next(error);
   }
 });
 
-app.get("/getAariBendingPending", async (req, res) => {
+app.get("/getAariBendingPending", async (req, res, next) => {
   try {
-    const pendingOrders = await Aari.find({ status: "pending" }, "name design status orderid");
+    const { page = 1, limit = 10 } = req.query; // Pagination
+    const pendingOrders = await Aari.find({ status: STATUS.PENDING })
+      .select("name design status orderid")
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit));
     res.status(200).json({ success: true, data: pendingOrders });
   } catch (error) {
-    console.error("Error fetching pending Aari orders:", error);
-    res.status(500).json({ success: false, error: "Failed to fetch pending orders" });
+    next(error);
   }
 });
 
-// Add this endpoint in server.js
-app.get("/getDesignUrl/:orderid", async (req, res) => {
+app.get("/getDesignUrl/:orderid", async (req, res, next) => {
   try {
     const { orderid } = req.params;
-    const order = await Aari.findOne({ orderid }, "design");
-    if (!order) {
-      return res.status(404).json({ success: false, error: "Order not found" });
-    }
-    res.status(200).json({ success: true, design: order.design });
+    const order = await Aari.findOne({ orderid }).select("design");
+    if (!order) return res.status(404).json({ success: false, error: "Order not found" });
+    res.status(200).json({ success: true, design: order.design[0] }); // Return first design URL
   } catch (error) {
-    console.error("Error fetching design URL:", error);
-    res.status(500).json({ success: false, error: "Failed to fetch design URL" });
+    next(error);
   }
 });
 
-app.get("/getAariBendingCompleted", async (req, res) => {
+app.get("/getAariBendingCompleted", async (req, res, next) => {
   try {
-    const completedOrders = await Aari.find({ status: "completed" }, "name design status");
-    res.status(200).json({ success: true, data: completedOrders });
+    const { page = 1, limit = 10 } = req.query; // Pagination
+    const completedOrders = await Aari.find({ status: STATUS.COMPLETED })
+      .select("orderid name phonenumber design status updatedAt clientprice workerprice")
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit));
+    const formattedOrders = completedOrders.map((order) => ({
+      orderid: order.orderid,
+      name: order.name,
+      phonenumber: order.phonenumber,
+      design: order.design,
+      status: order.status,
+      completedDate: order.updatedAt.toLocaleDateString("en-GB"),
+      clientprice: order.clientprice,
+      workerprice: order.workerprice,
+    }));
+    res.status(200).json({ success: true, data: formattedOrders });
   } catch (error) {
-    console.error("Error fetching completed Aari orders:", error);
-    res.status(500).json({ success: false, error: "Failed to fetch completed orders" });
+    next(error);
   }
 });
 
-app.put("/updateAariBendingStatus/:orderid", async (req, res) => {
+app.put("/updateAariBendingStatus/:orderid", async (req, res, next) => {
   try {
     const { orderid } = req.params;
-
     const updatedOrder = await Aari.findOneAndUpdate(
       { orderid },
-      { status: "Completed" },
+      { status: STATUS.COMPLETED, completeddate: new Date(), updatedAt: new Date() },
       { new: true }
     );
-
-    if (!updatedOrder) {
-      return res.status(404).json({ success: false, error: "Order not found" });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "Status updated successfully",
-      data: updatedOrder,
-    });
+    if (!updatedOrder) return res.status(404).json({ success: false, error: "Order not found" });
+    res.status(200).json({ success: true, message: "Status updated successfully", data: updatedOrder });
   } catch (error) {
-    console.error("Error updating Aari status:", error);
-    res.status(500).json({ success: false, error: "Failed to update status" });
+    next(error);
   }
 });
 
+app.put("/updateClientPriceByPhone/:phonenumber", async (req, res, next) => {
+  try {
+    const { phonenumber } = req.params;
+    const { clientprice } = req.body;
+    if (!clientprice || typeof clientprice !== "number" || clientprice <= 0) {
+      return res.status(400).json({ success: false, error: "Client price must be a positive number" });
+    }
+    const updatedOrder = await Aari.findOneAndUpdate(
+      { phonenumber },
+      { clientprice, updatedAt: new Date() },
+      { new: true, sort: { createdAt: -1 } }
+    );
+    if (!updatedOrder) {
+      return res.status(404).json({ success: false, error: "No order found for this phone number" });
+    }
+    res.status(200).json({ success: true, message: "Client price updated successfully", data: updatedOrder });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/updateWorkerPrice/:orderid", async (req, res, next) => {
+  try {
+    const { orderid } = req.params;
+    const { workerprice } = req.body;
+    if (!workerprice || typeof workerprice !== "number" || workerprice <= 0) {
+      return res.status(400).json({ success: false, error: "Worker price must be a positive number" });
+    }
+    const updatedOrder = await Aari.findOneAndUpdate(
+      { orderid, status: STATUS.COMPLETED },
+      { workerprice, updatedAt: new Date() },
+      { new: true }
+    );
+    if (!updatedOrder) {
+      return res.status(404).json({ success: false, error: "Completed order not found for this orderid" });
+    }
+    res.status(200).json({ success: true, message: "Worker price updated successfully", data: updatedOrder });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Global Error Handler
+app.use((err, req, res, next) => {
+  logger.error(`${req.method} ${req.url} - Error: ${err.message}`, { stack: err.stack });
+  if (err instanceof multer.MulterError) {
+    return res.status(400).json({ success: false, error: err.message });
+  }
+  res.status(500).json({ success: false, error: "Internal Server Error" });
+});
+
+// Start Server
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log(`Server is listening on port ${port}`);
+  logger.info(`Server is listening on port ${port}`);
 });
