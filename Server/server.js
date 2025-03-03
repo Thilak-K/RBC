@@ -172,10 +172,24 @@ app.get("/getAariBendingPending", async (req, res, next) => {
   try {
     const { page = 1, limit = 10 } = req.query; // Pagination
     const pendingOrders = await Aari.find({ status: STATUS.PENDING })
-      .select("name design status orderid")
+      .select("name design status orderid address deliverydate workerprice")
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
     res.status(200).json({ success: true, data: pendingOrders });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/deleteAariBendingOrder/:orderid", async (req, res, next) => {
+  try {
+    const { orderid } = req.params;
+    const deletedOrder = await Aari.findOneAndDelete({ orderid });
+    if (!deletedOrder) {
+      return res.status(404).json({ success: false, error: "Order not found" });
+    }
+    logger.info(`Order ${orderid} deleted successfully`);
+    res.status(200).json({ success: true, message: "Order deleted successfully" });
   } catch (error) {
     next(error);
   }
@@ -218,13 +232,30 @@ app.get("/getAariBendingCompleted", async (req, res, next) => {
 app.put("/updateAariBendingStatus/:orderid", async (req, res, next) => {
   try {
     const { orderid } = req.params;
+    const { workerprice } = req.body;
+
+    // Validate workerprice
+    if (!workerprice || typeof workerprice !== "number" || workerprice <= 0) {
+      return res.status(400).json({ success: false, error: "Worker price must be a positive number" });
+    }
+
+    const updateFields = {
+      status: STATUS.COMPLETED,
+      completeddate: new Date(),
+      updatedAt: new Date(),
+      workerprice, // Set workerprice from the request body
+    };
+
     const updatedOrder = await Aari.findOneAndUpdate(
       { orderid },
-      { status: STATUS.COMPLETED, completeddate: new Date(), updatedAt: new Date() },
+      updateFields,
       { new: true }
     );
+
     if (!updatedOrder) return res.status(404).json({ success: false, error: "Order not found" });
-    res.status(200).json({ success: true, message: "Status updated successfully", data: updatedOrder });
+
+    logger.info(`Order ${orderid} marked as completed with workerprice ${workerprice}`);
+    res.status(200).json({ success: true, message: "Status and worker price updated successfully", data: updatedOrder });
   } catch (error) {
     next(error);
   }
@@ -251,26 +282,6 @@ app.put("/updateClientPriceByPhone/:phonenumber", async (req, res, next) => {
   }
 });
 
-app.put("/updateWorkerPrice/:orderid", async (req, res, next) => {
-  try {
-    const { orderid } = req.params;
-    const { workerprice } = req.body;
-    if (!workerprice || typeof workerprice !== "number" || workerprice <= 0) {
-      return res.status(400).json({ success: false, error: "Worker price must be a positive number" });
-    }
-    const updatedOrder = await Aari.findOneAndUpdate(
-      { orderid, status: STATUS.COMPLETED },
-      { workerprice, updatedAt: new Date() },
-      { new: true }
-    );
-    if (!updatedOrder) {
-      return res.status(404).json({ success: false, error: "Completed order not found for this orderid" });
-    }
-    res.status(200).json({ success: true, message: "Worker price updated successfully", data: updatedOrder });
-  } catch (error) {
-    next(error);
-  }
-});
 
 // Global Error Handler
 app.use((err, req, res, next) => {

@@ -4,7 +4,7 @@ const ShopSchema = new mongoose.Schema(
   {
     name: String,
     logourl: String,
-    authlogoUrl: string,
+    authlogoUrl: String,
   },
   { collection: "ShopName" }
 );
