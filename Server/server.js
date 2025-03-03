@@ -128,7 +128,7 @@ app.post("/getUsersDetails", async (req, res, next) => {
 
 app.post("/submitAariInput", upload.array("design"), validate(submitAariSchema), async (req, res, next) => {
   try {
-    const { orderid, name, phonenumber, submissiondate, deliverydate, address, additionalinformation, staffname, quotedprice } = req.body;
+    const { orderid, name, phonenumber, submissiondate, deliverydate, address, additionalinformation, staffname, worktype, quotedprice } = req.body;
     const designURLs = [];
 
     if (req.files && req.files.length > 0) {
@@ -155,15 +155,23 @@ app.post("/submitAariInput", upload.array("design"), validate(submitAariSchema),
       submissiondate,
       deliverydate,
       address,
-      additionalinformation,
+      additionalinformation: additionalinformation || undefined, 
       staffname,
+      worktype,
       design: designURLs,
       status: STATUS.PENDING,
-      quotedprice,
+      quotedprice: Number(quotedprice), 
     });
+
     await newAariEntry.save();
     res.status(201).json({ success: true, message: "Aari input submitted successfully", orderid });
   } catch (error) {
+    if (error.name === "ValidationError") {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    if (error.code === 11000) {
+      return res.status(409).json({ success: false, error: "Order ID already exists" });
+    }
     next(error);
   }
 });
