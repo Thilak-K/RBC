@@ -88,6 +88,7 @@ const submitAariSchema = Joi.object({
   address: Joi.string().required(),
   additionalinformation: Joi.string().allow(""),
   staffname: Joi.string().required(),
+  worktype:Joi.string().required(),
   quotedprice: Joi.number().positive().required(),
 });
 
