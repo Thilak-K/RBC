@@ -80,13 +80,13 @@ const AariSchema = new mongoose.Schema({
   },
   completeddate: {
     type: Date,
+
     default: null,
   },
 }, {
   collection: "Aari",
   timestamps: true,
 });
-
 AariSchema.pre('save', function (next) {
   if (this.isModified('status') && this.status === "completed" && !this.completeddate) {
     this.completeddate = new Date();
