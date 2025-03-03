@@ -87,7 +87,6 @@ const AariSchema = new mongoose.Schema({
   timestamps: true,
 });
 
-
 AariSchema.pre('save', function (next) {
   if (this.isModified('status') && this.status === "completed" && !this.completeddate) {
     this.completeddate = new Date();
