@@ -45,6 +45,12 @@ const AariSchema = new mongoose.Schema({
     type: String,
     trim: true,
   }],
+  worktype: {
+    type: String,
+    required: [true, "Work type (bridal or normal) is required"],
+    trim: true,
+    lowercase: true,
+  },
   staffname: {
     type: String,
     required: [true, "Staff name is required"],
@@ -52,9 +58,9 @@ const AariSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ["pending", "completed"], 
+    enum: ["pending", "completed"],
     default: "pending",
-    lowercase: true, 
+    lowercase: true,
   },
   quotedprice: {
     type: Number,
@@ -63,7 +69,7 @@ const AariSchema = new mongoose.Schema({
   },
   workerprice: {
     type: Number,
-    default: null, 
+    default: null,
     min: [0, "Worker price cannot be negative"],
   },
   clientprice: {
@@ -73,14 +79,13 @@ const AariSchema = new mongoose.Schema({
   },
   completeddate: {
     type: Date,
-    default: null, 
+
+    default: null,
   },
 }, {
   collection: "Aari",
-  timestamps: true, 
+  timestamps: true,
 });
-
-
 AariSchema.pre('save', function (next) {
   if (this.isModified('status') && this.status === "completed" && !this.completeddate) {
     this.completeddate = new Date();

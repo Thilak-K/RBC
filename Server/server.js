@@ -13,7 +13,14 @@ const Joi = require("joi");
 const app = express();
 
 // Environment Variable Validation
-const requiredEnvVars = ["MONGO", "AWS_REGION", "KEY_ID", "ACCESS_KEY", "S3_BUCKET_NAME", "PORT"];
+const requiredEnvVars = [
+  "MONGO",
+  "AWS_REGION",
+  "KEY_ID",
+  "ACCESS_KEY",
+  "S3_BUCKET_NAME",
+  "PORT",
+];
 requiredEnvVars.forEach((varName) => {
   if (!process.env[varName]) {
     console.error(`Missing environment variable: ${varName}`);
@@ -24,12 +31,19 @@ requiredEnvVars.forEach((varName) => {
 // Logger Setup
 const logger = winston.createLogger({
   level: "info",
-  format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
   transports: [new winston.transports.Console()],
 });
 
 // Middleware
-app.use(cors({ origin: process.env.ALLOWED_ORIGINS?.split(",") || "http://localhost:3000" }));
+app.use(
+  cors({
+    origin: process.env.ALLOWED_ORIGINS?.split(",") || "http://localhost:3000",
+  })
+);
 app.use(express.json());
 app.use(
   rateLimit({
@@ -40,7 +54,10 @@ app.use(
 
 // MongoDB Connection
 mongoose
-  .connect(process.env.MONGO, { useNewUrlParser: true, useUnifiedTopology: true })
+  .connect(process.env.MONGO, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
   .then(() => logger.info("MongoDB Connected"))
   .catch((err) => {
     logger.error("MongoDB Connection Error:", err);
@@ -60,6 +77,7 @@ const s3 = new S3Client({
 const Shop = require("./models/Shop");
 const User = require("./models/User");
 const Aari = require("./models/Aari");
+const Customer = require("./models/Customers"); 
 
 // Constants
 const STATUS = {
@@ -88,13 +106,39 @@ const submitAariSchema = Joi.object({
   address: Joi.string().required(),
   additionalinformation: Joi.string().allow(""),
   staffname: Joi.string().required(),
+  worktype: Joi.string().required(),
   quotedprice: Joi.number().positive().required(),
+});
+
+const customerSchema = Joi.object({
+  customerId: Joi.string().required(),
+  name: Joi.string().max(100).required(),
+  phoneNumber: Joi.string()
+    .pattern(/^\+91-\d{10}$/)
+    .required()
+    .messages({ "string.pattern.base": "Phone number must be in format +91-XXXXXXXXXX" }),
+  alternateNumber: Joi.string()
+    .pattern(/^\+91-\d{10}$/)
+    .allow(null)
+    .messages({ "string.pattern.base": "Alternate number must be in format +91-XXXXXXXXXX" }),
+  address: Joi.string().max(500).required(),
+  town: Joi.string().max(100).allow(""),
+  district: Joi.string().required(),
+  state: Joi.string().required(),
+  dateOfBirth: Joi.string()
+    .pattern(/^\d{2}\/\d{2}\/\d{4}$/)
+    .required()
+    .messages({ "string.pattern.base": "Date of birth must be in DD/MM/YYYY format" }),
+  maritalStatus: Joi.string().required(),
 });
 
 // Middleware to Validate Requests
 const validate = (schema) => (req, res, next) => {
   const { error } = schema.validate(req.body);
-  if (error) return res.status(400).json({ success: false, error: error.details[0].message });
+  if (error)
+    return res
+      .status(400)
+      .json({ success: false, error: error.details[0].message });
   next();
 };
 
@@ -102,8 +146,12 @@ const validate = (schema) => (req, res, next) => {
 app.get("/getShopDetails", async (req, res, next) => {
   try {
     const shop = await Shop.findOne();
-    if (!shop) return res.status(404).json({ success: false, error: "Shop not found" });
-    res.json({ success: true, data: { name: shop.name, authlogoUrl: shop.authlogoUrl } });
+    if (!shop)
+      return res.status(404).json({ success: false, error: "Shop not found" });
+    res.json({
+      success: true,
+      data: { name: shop.name, authlogoUrl: shop.authlogoUrl },
+    });
   } catch (error) {
     next(error);
   }
@@ -113,66 +161,163 @@ app.post("/getUsersDetails", async (req, res, next) => {
   try {
     const { email, phone } = req.body;
     if (!email || !phone) {
-      return res.status(400).json({ success: false, error: "Email and phone number are required" });
+      return res
+        .status(400)
+        .json({ success: false, error: "Email and phone number are required" });
     }
     const phoneNumber = phone.replace("+91", "");
     const user = await User.findOne({ email, phonenumber: phoneNumber });
     if (!user) {
       return res.status(404).json({ success: false, error: "User not found" });
     }
-    res.json({ success: true, data: { name: user.name, phonenumber: user.phonenumber, email: user.email } });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/submitAariInput", upload.array("design"), validate(submitAariSchema), async (req, res, next) => {
-  try {
-    const { orderid, name, phonenumber, submissiondate, deliverydate, address, additionalinformation, staffname, quotedprice } = req.body;
-    const designURLs = [];
-
-    if (req.files && req.files.length > 0) {
-      const uploadPromises = req.files.map(async (file) => {
-        const uniqueFilename = `${uuidv4()}.${file.originalname.split(".").pop()}`;
-        const params = {
-          Bucket: process.env.S3_BUCKET_NAME,
-          Key: `Aari/${uniqueFilename}`,
-          Body: file.buffer,
-          ContentType: file.mimetype,
-        };
-        await s3.send(new PutObjectCommand(params));
-        return `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/Aari/${uniqueFilename}`;
-      });
-      designURLs.push(...(await Promise.all(uploadPromises)));
-    } else {
-      return res.status(400).json({ success: false, error: "At least one design file is required" });
-    }
-
-    const newAariEntry = new Aari({
-      orderid,
-      name,
-      phonenumber,
-      submissiondate,
-      deliverydate,
-      address,
-      additionalinformation,
-      staffname,
-      design: designURLs,
-      status: STATUS.PENDING,
-      quotedprice,
+    res.json({
+      success: true,
+      data: {
+        name: user.name,
+        phonenumber: user.phonenumber,
+        email: user.email,
+      },
     });
-    await newAariEntry.save();
-    res.status(201).json({ success: true, message: "Aari input submitted successfully", orderid });
   } catch (error) {
     next(error);
   }
 });
 
-app.get("/getAariBendingPending", async (req, res, next) => {
+app.post(
+  "/submitAariInput",
+  upload.array("design"),
+  validate(submitAariSchema),
+  async (req, res, next) => {
+    try {
+      const {
+        orderid,
+        name,
+        phonenumber,
+        submissiondate,
+        deliverydate,
+        address,
+        additionalinformation,
+        staffname,
+        worktype,
+        quotedprice,
+      } = req.body;
+      const designURLs = [];
+
+      if (req.files && req.files.length > 0) {
+        const uploadPromises = req.files.map(async (file) => {
+          const uniqueFilename = `${uuidv4()}.${file.originalname
+            .split(".")
+            .pop()}`;
+          const params = {
+            Bucket: process.env.S3_BUCKET_NAME,
+            Key: `Aari/${uniqueFilename}`,
+            Body: file.buffer,
+            ContentType: file.mimetype,
+          };
+          await s3.send(new PutObjectCommand(params));
+          return `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/Aari/${uniqueFilename}`;
+        });
+        designURLs.push(...(await Promise.all(uploadPromises)));
+      } else {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error: "At least one design file is required",
+          });
+      }
+
+      const newAariEntry = new Aari({
+        orderid,
+        name,
+        phonenumber,
+        submissiondate,
+        deliverydate,
+        address,
+        additionalinformation: additionalinformation || undefined,
+        staffname,
+        worktype,
+        design: designURLs,
+        status: STATUS.PENDING,
+        quotedprice: Number(quotedprice),
+      });
+
+      await newAariEntry.save();
+      res
+        .status(201)
+        .json({
+          success: true,
+          message: "Aari input submitted successfully",
+          orderid,
+        });
+    } catch (error) {
+      if (error.name === "ValidationError") {
+        return res.status(400).json({ success: false, error: error.message });
+      }
+      if (error.code === 11000) {
+        return res
+          .status(409)
+          .json({ success: false, error: "Order ID already exists" });
+      }
+      next(error);
+    }
+  }
+);
+
+// New Route to Save Customer Data
+app.post("/submitCustomers", validate(customerSchema), async (req, res, next) => {
   try {
-    const { page = 1, limit = 10 } = req.query; // Pagination
+    const {
+      customerId,
+      name,
+      phoneNumber,
+      alternateNumber,
+      address,
+      town,
+      district,
+      state,
+      dateOfBirth,
+      maritalStatus,
+    } = req.body;
+
+    const newCustomer = new Customer({
+      customerId,
+      name,
+      phoneNumber,
+      alternateNumber,
+      address,
+      town,
+      district,
+      state,
+      dateOfBirth,
+      maritalStatus,
+    });
+
+    await newCustomer.save();
+    logger.info(`Customer ${customerId} saved successfully`);
+    res.status(201).json({
+      success: true,
+      message: "Customer saved successfully",
+      customerId,
+    });
+  } catch (error) {
+    if (error.name === "ValidationError") {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    if (error.code === 11000) {
+      return res
+        .status(409)
+        .json({ success: false, error: "Phone number already exists" });
+    }
+    next(error);
+  }
+});
+
+app.get("/getAariPending", async (req, res, next) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
     const pendingOrders = await Aari.find({ status: STATUS.PENDING })
-      .select("name design status orderid address deliverydate workerprice")
+      .select("name design status orderid address deliverydate workerprice worktype")
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
     res.status(200).json({ success: true, data: pendingOrders });
@@ -189,7 +334,9 @@ app.delete("/deleteAariBendingOrder/:orderid", async (req, res, next) => {
       return res.status(404).json({ success: false, error: "Order not found" });
     }
     logger.info(`Order ${orderid} deleted successfully`);
-    res.status(200).json({ success: true, message: "Order deleted successfully" });
+    res
+      .status(200)
+      .json({ success: true, message: "Order deleted successfully" });
   } catch (error) {
     next(error);
   }
@@ -199,8 +346,9 @@ app.get("/getDesignUrl/:orderid", async (req, res, next) => {
   try {
     const { orderid } = req.params;
     const order = await Aari.findOne({ orderid }).select("design");
-    if (!order) return res.status(404).json({ success: false, error: "Order not found" });
-    res.status(200).json({ success: true, design: order.design[0] }); // Return first design URL
+    if (!order)
+      return res.status(404).json({ success: false, error: "Order not found" });
+    res.status(200).json({ success: true, design: order.design[0] });
   } catch (error) {
     next(error);
   }
@@ -208,9 +356,11 @@ app.get("/getDesignUrl/:orderid", async (req, res, next) => {
 
 app.get("/getAariBendingCompleted", async (req, res, next) => {
   try {
-    const { page = 1, limit = 10 } = req.query; // Pagination
+    const { page = 1, limit = 10 } = req.query;
     const completedOrders = await Aari.find({ status: STATUS.COMPLETED })
-      .select("orderid name phonenumber design status updatedAt clientprice workerprice")
+      .select(
+        "orderid name phonenumber design status updatedAt clientprice workerprice"
+      )
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
     const formattedOrders = completedOrders.map((order) => ({
@@ -234,16 +384,20 @@ app.put("/updateAariBendingStatus/:orderid", async (req, res, next) => {
     const { orderid } = req.params;
     const { workerprice } = req.body;
 
-    // Validate workerprice
     if (!workerprice || typeof workerprice !== "number" || workerprice <= 0) {
-      return res.status(400).json({ success: false, error: "Worker price must be a positive number" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: "Worker price must be a positive number",
+        });
     }
 
     const updateFields = {
       status: STATUS.COMPLETED,
       completeddate: new Date(),
       updatedAt: new Date(),
-      workerprice, // Set workerprice from the request body
+      workerprice,
     };
 
     const updatedOrder = await Aari.findOneAndUpdate(
@@ -252,10 +406,19 @@ app.put("/updateAariBendingStatus/:orderid", async (req, res, next) => {
       { new: true }
     );
 
-    if (!updatedOrder) return res.status(404).json({ success: false, error: "Order not found" });
+    if (!updatedOrder)
+      return res.status(404).json({ success: false, error: "Order not found" });
 
-    logger.info(`Order ${orderid} marked as completed with workerprice ${workerprice}`);
-    res.status(200).json({ success: true, message: "Status and worker price updated successfully", data: updatedOrder });
+    logger.info(
+      `Order ${orderid} marked as completed with workerprice ${workerprice}`
+    );
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: "Status and worker price updated successfully",
+        data: updatedOrder,
+      });
   } catch (error) {
     next(error);
   }
@@ -266,7 +429,12 @@ app.put("/updateClientPriceByPhone/:phonenumber", async (req, res, next) => {
     const { phonenumber } = req.params;
     const { clientprice } = req.body;
     if (!clientprice || typeof clientprice !== "number" || clientprice <= 0) {
-      return res.status(400).json({ success: false, error: "Client price must be a positive number" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: "Client price must be a positive number",
+        });
     }
     const updatedOrder = await Aari.findOneAndUpdate(
       { phonenumber },
@@ -274,18 +442,30 @@ app.put("/updateClientPriceByPhone/:phonenumber", async (req, res, next) => {
       { new: true, sort: { createdAt: -1 } }
     );
     if (!updatedOrder) {
-      return res.status(404).json({ success: false, error: "No order found for this phone number" });
+      return res
+        .status(404)
+        .json({
+          success: false,
+          error: "No order found for this phone number",
+        });
     }
-    res.status(200).json({ success: true, message: "Client price updated successfully", data: updatedOrder });
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: "Client price updated successfully",
+        data: updatedOrder,
+      });
   } catch (error) {
     next(error);
   }
 });
 
-
 // Global Error Handler
 app.use((err, req, res, next) => {
-  logger.error(`${req.method} ${req.url} - Error: ${err.message}`, { stack: err.stack });
+  logger.error(`${req.method} ${req.url} - Error: ${err.message}`, {
+    stack: err.stack,
+  });
   if (err instanceof multer.MulterError) {
     return res.status(400).json({ success: false, error: err.message });
   }
