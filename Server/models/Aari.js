@@ -47,7 +47,6 @@ const AariSchema = new mongoose.Schema({
   }],
   worktype: {
     type: String,
-    enum: ["bridal", "normal"],
     required: [true, "Work type (bridal or normal) is required"],
     trim: true,
     lowercase: true,
