@@ -75,5 +75,5 @@ CustomerSchema.pre('save', function (next) {
   next();
 });
 
-const Customer = mongoose.model("Customer", CustomerSchema);
+const Customer = mongoose.model("Customers", CustomerSchema);
 module.exports = Customer;
