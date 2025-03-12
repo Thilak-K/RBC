@@ -1,6 +1,12 @@
 const mongoose = require("mongoose");
 
 const AariSchema = new mongoose.Schema({
+  customerId: { 
+    type: String,
+    required: [true, "Customer ID is required"],
+    trim: true,
+    ref: "Customers",
+  },
   orderid: {
     type: String,
     required: [true, "Order ID is required"],
@@ -41,10 +47,27 @@ const AariSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
-  design: [{
+  design1: {
+    type: String,
+    required: [true, "design1 is required"],
+    trim: true,
+  },
+  design2: {
     type: String,
     trim: true,
-  }],
+  },
+  design3: {
+    type: String,
+    trim: true,
+  },
+  design4: {
+    type: String,
+    trim: true,
+  },
+  design5: {
+    type: String,
+    trim: true,
+  },
   worktype: {
     type: String,
     required: [true, "Work type (bridal or normal) is required"],
@@ -79,13 +102,13 @@ const AariSchema = new mongoose.Schema({
   },
   completeddate: {
     type: Date,
-
     default: null,
   },
 }, {
   collection: "Aari",
   timestamps: true,
 });
+
 AariSchema.pre('save', function (next) {
   if (this.isModified('status') && this.status === "completed" && !this.completeddate) {
     this.completeddate = new Date();
