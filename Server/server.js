@@ -17,8 +17,7 @@ const env = cleanEnv(process.env, {
   S3_BUCKET_NAME: str(),
   PORT: num({ default: 3000 }),
   ALLOWED_ORIGINS: str(),
-  JWT_SECRET: str(), 
-  REDIS_URL: str({ default: "redis://localhost:6379" }),
+  RATE_LIMIT_MAX: num({ default: 100 }), 
 });
 
 // Initialize Express
@@ -32,9 +31,12 @@ app.use(express.json());
 app.use(
   rateLimit({
     windowMs: 15 * 60 * 1000, 
-    max: 100,
+    max: 100, 
+    message: { success: false, error: "Too many requests, please try again later" }
   })
 );
+
+// Logging Middleware
 app.use((req, res, next) => {
   logger.info(`${req.method} ${req.url}`);
   next();
@@ -43,38 +45,39 @@ app.use((req, res, next) => {
 // MongoDB Connection
 mongoose
   .connect(env.MONGO)
-  .then(() => logger.info("MongoDB Connected"))
+  .then(() => logger.info("✅ MongoDB Connected"))
   .catch((err) => {
-    logger.error("MongoDB Connection Error:", err);
+    logger.error("❌ MongoDB Connection Error:", err);
     process.exit(1);
   });
 
 // Routes
-const shopRoutes = require("./routes/shop");
-const userRoutes = require("./routes/user");
-const customerRoutes = require("./routes/customer");
-const aariRoutes = require("./routes/aari");
-
-app.use(`${API_VERSION}/shop`, shopRoutes);
-app.use(`${API_VERSION}/user`, userRoutes);
-app.use(`${API_VERSION}/customer`, customerRoutes);
-app.use(`${API_VERSION}/aari`, aariRoutes);
+app.use(`${API_VERSION}/shop`, require("./routes/shop"));
+app.use(`${API_VERSION}/user`, require("./routes/user"));
+app.use(`${API_VERSION}/customer`, require("./routes/customer"));
+app.use(`${API_VERSION}/aari`, require("./routes/aari"));
 
 // Global Error Handler
 app.use((err, req, res, next) => {
-  logger.error(`${req.method} ${req.url} - Error: ${err.message}`, { stack: err.stack });
-  if (err instanceof multer.MulterError) return res.status(400).json({ success: false, error: err.message });
+  logger.error(`❌ ${req.method} ${req.url} - Error: ${err.message}`, { stack: err.stack });
   res.status(500).json({ success: false, error: "Internal Server Error" });
 });
 
 // Start Server
 const port = env.PORT;
-const server = app.listen(port, () => logger.info(`Server is listening on port ${port}`));
+const server = app.listen(port, () => logger.info(`🚀 Server running on port ${port}`));
 
 // Graceful Shutdown
 process.on("SIGTERM", async () => {
-  logger.info("SIGTERM received. Shutting down gracefully...");
-  server.close();
-  await mongoose.connection.close();
-  process.exit(0);
+  try {
+    logger.info("🛑 SIGTERM received. Shutting down gracefully...");
+    await mongoose.connection.close();
+    server.close(() => {
+      logger.info("✅ Server closed. Exiting process...");
+      process.exit(0);
+    });
+  } catch (err) {
+    logger.error("❌ Error during shutdown:", err);
+    process.exit(1);
+  }
 });

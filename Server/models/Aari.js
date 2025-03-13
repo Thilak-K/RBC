@@ -22,7 +22,7 @@ const AariSchema = new mongoose.Schema({
     type: String,
     required: [true, "Phone number is required"],
     trim: true,
-    match: [/^\+91-\d{10}$/, "Phone number must be in format +91-XXXXXXXXXX"],
+    match: [/^\+91[6-9]\d{9}$/, "Phone number must be in format +91XXXXXXXXXX starting with 6-9"],
   },
   submissiondate: {
     type: Date,
@@ -47,32 +47,21 @@ const AariSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
-  design1: {
-    type: String,
-    required: [true, "design1 is required"],
-    trim: true,
-  },
-  design2: {
-    type: String,
-    trim: true,
-  },
-  design3: {
-    type: String,
-    trim: true,
-  },
-  design4: {
-    type: String,
-    trim: true,
-  },
-  design5: {
-    type: String,
-    trim: true,
+  designs: {
+    type: [String],  // Store all design URLs in an array
+    validate: {
+      validator: function (designs) {
+        return designs.length > 0 && designs.length <= 5;
+      },
+      message: "At least one design is required, max 5 allowed.",
+    },
   },
   worktype: {
     type: String,
     required: [true, "Work type (bridal or normal) is required"],
     trim: true,
     lowercase: true,
+    enum: ["bridal", "normal"],
   },
   staffname: {
     type: String,
@@ -88,30 +77,37 @@ const AariSchema = new mongoose.Schema({
   quotedprice: {
     type: Number,
     required: [true, "Quoted price is required"],
-    min: [0, "Quoted price cannot be negative"],
+    min: [1, "Quoted price must be positive"],
   },
   workerprice: {
     type: Number,
     default: null,
-    min: [0, "Worker price cannot be negative"],
+    min: [1, "Worker price must be positive"],
   },
   clientprice: {
     type: Number,
     default: null,
-    min: [0, "Client price cannot be negative"],
+    min: [1, "Client price must be positive"],
   },
   completeddate: {
     type: Date,
     default: null,
+  },
+  updatedAt: {
+    type: Date,
   },
 }, {
   collection: "Aari",
   timestamps: true,
 });
 
-AariSchema.pre('save', function (next) {
-  if (this.isModified('status') && this.status === "completed" && !this.completeddate) {
-    this.completeddate = new Date();
+// Ensure `completeddate` is set when status changes to completed
+AariSchema.pre("save", function (next) {
+  if (this.isModified("status")) {
+    if (this.status === "completed" && !this.completeddate) {
+      this.completeddate = new Date();
+    }
+    this.updatedAt = new Date();  
   }
   next();
 });
